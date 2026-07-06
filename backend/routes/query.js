@@ -34,10 +34,18 @@ router.post('/', async (req, res) => {
       });
     }
 
+    console.log(`\nIncoming:\n${text}\n`);
+
     const apiKey = process.env.GEMINI_API_KEY;
+    let fallbackUsed = true;
+    let geminiStatus = 'N/A';
+    let geminiBody = 'N/A';
+    let parsedAnswer = 'N/A';
+
     if (apiKey && apiKey !== 'your_key_here') {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      console.log(`Gemini API URL:\n${url}\n`);
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
         const response = await fetch(url, {
           method: 'POST',
           headers: {
@@ -52,10 +60,23 @@ router.post('/', async (req, res) => {
           })
         });
 
+        geminiStatus = response.status;
+        console.log(`Gemini Status:\n${geminiStatus}\n`);
+
+        const rawBody = await response.text();
+        geminiBody = rawBody;
+        console.log(`Gemini Body:\n${geminiBody}\n`);
+
         if (response.ok) {
-          const data = await response.json();
+          const data = JSON.parse(rawBody);
           if (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
             const answer = data.candidates[0].content.parts[0].text;
+            parsedAnswer = answer;
+            fallbackUsed = false;
+            
+            console.log(`Parsed Answer:\n${parsedAnswer}\n`);
+            console.log(`Fallback Used:\n${fallbackUsed}\n`);
+
             return res.status(200).json({
               success: true,
               data: { answer, source: 'gemini' },
@@ -64,8 +85,7 @@ router.post('/', async (req, res) => {
             });
           }
         } else {
-          const errText = await response.text();
-          console.warn(`Gemini API request failed with status ${response.status}: ${errText}`);
+          console.warn(`Gemini API request failed with status ${response.status}: ${rawBody}`);
         }
       } catch (geminiErr) {
         console.error('Error querying Gemini API:', geminiErr.message);
@@ -74,6 +94,9 @@ router.post('/', async (req, res) => {
 
     // Fallback response
     const answer = getFallbackResponse(text);
+    console.log(`Parsed Answer:\n${answer}\n`);
+    console.log(`Fallback Used:\n${fallbackUsed}\n`);
+
     res.status(200).json({
       success: true,
       data: { answer, source: 'fallback' },
