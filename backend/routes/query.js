@@ -34,19 +34,27 @@ router.post('/', async (req, res) => {
       });
     }
 
-    console.log(`\nIncoming:\n${text}\n`);
-
     const apiKey = process.env.GEMINI_API_KEY;
-    let fallbackUsed = true;
-    let geminiStatus = 'N/A';
-    let geminiBody = 'N/A';
-    let parsedAnswer = 'N/A';
+    const modelStr = 'gemini-1.5-flash';
+    const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey ? '***KEY_PRESENT***' : '***MISSING***'}`;
 
-    if (apiKey && apiKey !== 'your_key_here') {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      console.log(`Gemini API URL:\n${url}\n`);
+    let apiKeyExists = !!apiKey;
+    let apiKeyLength = apiKey ? apiKey.length : 0;
+    let googleStatus = 'N/A';
+    let googleResponse = 'N/A';
+    let errorMessage = 'N/A';
+    let fallbackReason = 'N/A';
+
+    console.log(`\n========================\nIncoming prompt:\n${text}\n`);
+
+    if (!apiKey) {
+      fallbackReason = 'apiKey missing';
+    } else if (apiKey === 'your_key_here') {
+      fallbackReason = 'apiKey == "your_key_here"';
+    } else {
+      const actualUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey}`;
       try {
-        const response = await fetch(url, {
+        const response = await fetch(actualUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -60,22 +68,35 @@ router.post('/', async (req, res) => {
           })
         });
 
-        geminiStatus = response.status;
-        console.log(`Gemini Status:\n${geminiStatus}\n`);
-
+        googleStatus = response.status;
         const rawBody = await response.text();
-        geminiBody = rawBody;
-        console.log(`Gemini Body:\n${geminiBody}\n`);
+        googleResponse = rawBody;
 
         if (response.ok) {
-          const data = JSON.parse(rawBody);
-          if (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
+          let data;
+          try {
+            data = JSON.parse(rawBody);
+          } catch (e) {
+            fallbackReason = 'response parsing failed';
+            throw e;
+          }
+
+          if (!data || !data.candidates || data.candidates.length === 0) {
+            fallbackReason = 'candidates missing';
+          } else if (!data.candidates[0].content || !data.candidates[0].content.parts || data.candidates[0].content.parts.length === 0) {
+            fallbackReason = 'parts missing';
+          } else {
             const answer = data.candidates[0].content.parts[0].text;
-            parsedAnswer = answer;
-            fallbackUsed = false;
             
-            console.log(`Parsed Answer:\n${parsedAnswer}\n`);
-            console.log(`Fallback Used:\n${fallbackUsed}\n`);
+            console.log("GEMINI_API_KEY EXISTS:\n" + apiKeyExists);
+            console.log("\nAPI KEY LENGTH:\n" + apiKeyLength);
+            console.log("\nMODEL:\n" + modelStr);
+            console.log("\nREQUEST URL:\n" + requestUrl);
+            console.log("\nGOOGLE HTTP STATUS:\n" + googleStatus);
+            console.log("\nGOOGLE RESPONSE:\n" + googleResponse);
+            console.log("\nERROR:\n" + errorMessage);
+            console.log("\nFALLBACK REASON:\nNone (Gemini Success)");
+            console.log("\n========================\n");
 
             return res.status(200).json({
               success: true,
@@ -85,18 +106,38 @@ router.post('/', async (req, res) => {
             });
           }
         } else {
-          console.warn(`Gemini API request failed with status ${response.status}: ${rawBody}`);
+          if (response.status === 401) {
+            fallbackReason = 'Google 401';
+          } else if (response.status === 403) {
+            fallbackReason = 'Google 403';
+          } else if (response.status === 404) {
+            fallbackReason = 'Google 404';
+          } else if (response.status === 429) {
+            fallbackReason = 'quota exceeded';
+          } else {
+            fallbackReason = `Google HTTP error (${response.status})`;
+          }
         }
       } catch (geminiErr) {
-        console.error('Error querying Gemini API:', geminiErr.message);
+        errorMessage = geminiErr.message;
+        if (fallbackReason === 'N/A') {
+          fallbackReason = 'exception thrown';
+        }
       }
     }
 
+    console.log("GEMINI_API_KEY EXISTS:\n" + apiKeyExists);
+    console.log("\nAPI KEY LENGTH:\n" + apiKeyLength);
+    console.log("\nMODEL:\n" + modelStr);
+    console.log("\nREQUEST URL:\n" + requestUrl);
+    console.log("\nGOOGLE HTTP STATUS:\n" + googleStatus);
+    console.log("\nGOOGLE RESPONSE:\n" + googleResponse);
+    console.log("\nERROR:\n" + errorMessage);
+    console.log("\nFALLBACK REASON:\n" + fallbackReason);
+    console.log("\n========================\n");
+
     // Fallback response
     const answer = getFallbackResponse(text);
-    console.log(`Parsed Answer:\n${answer}\n`);
-    console.log(`Fallback Used:\n${fallbackUsed}\n`);
-
     res.status(200).json({
       success: true,
       data: { answer, source: 'fallback' },
