@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
-    const modelStr = 'gemini-1.5-flash';
+    const modelStr = 'gemini-2.0-flash';
     const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey ? '***KEY_PRESENT***' : '***MISSING***'}`;
 
     let apiKeyExists = !!apiKey;
