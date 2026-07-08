@@ -35,8 +35,11 @@ router.post('/', async (req, res) => {
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
-    const modelStr = 'gemini-2.0-flash';
-    const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey ? '***KEY_PRESENT***' : '***MISSING***'}`;
+    const isOpenRouter = apiKey && apiKey.startsWith('sk-or-');
+    const modelStr = isOpenRouter ? 'google/gemini-2.5-flash' : 'gemini-2.0-flash';
+    const requestUrl = isOpenRouter 
+      ? 'https://openrouter.ai/api/v1/chat/completions' 
+      : `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey ? '***KEY_PRESENT***' : '***MISSING***'}`;
 
     let apiKeyExists = !!apiKey;
     let apiKeyLength = apiKey ? apiKey.length : 0;
@@ -52,20 +55,37 @@ router.post('/', async (req, res) => {
     } else if (apiKey === 'your_key_here') {
       fallbackReason = 'apiKey == "your_key_here"';
     } else {
-      const actualUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey}`;
       try {
-        const response = await fetch(actualUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: "You are BloodIQ assistant. Answer questions about blood bank availability, shortage risks, and donor information for Indian cities. Be concise and direct. Question: " + text
-              }]
+        const fetchUrl = isOpenRouter 
+          ? 'https://openrouter.ai/api/v1/chat/completions' 
+          : `https://generativelanguage.googleapis.com/v1beta/models/${modelStr}:generateContent?key=${apiKey}`;
+
+        const fetchHeaders = {
+          'Content-Type': 'application/json'
+        };
+        if (isOpenRouter) {
+          fetchHeaders['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const fetchBody = isOpenRouter ? {
+          model: modelStr,
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: "You are BloodIQ assistant. Answer questions about blood bank availability, shortage risks, and donor information for Indian cities. Be concise and direct. Question: " + text
+          }]
+        } : {
+          contents: [{
+            parts: [{
+              text: "You are BloodIQ assistant. Answer questions about blood bank availability, shortage risks, and donor information for Indian cities. Be concise and direct. Question: " + text
             }]
-          })
+          }]
+        };
+
+        const response = await fetch(fetchUrl, {
+          method: 'POST',
+          headers: fetchHeaders,
+          body: JSON.stringify(fetchBody)
         });
 
         googleStatus = response.status;
@@ -81,13 +101,22 @@ router.post('/', async (req, res) => {
             throw e;
           }
 
-          if (!data || !data.candidates || data.candidates.length === 0) {
-            fallbackReason = 'candidates missing';
-          } else if (!data.candidates[0].content || !data.candidates[0].content.parts || data.candidates[0].content.parts.length === 0) {
-            fallbackReason = 'parts missing';
+          let answer = '';
+          if (isOpenRouter) {
+            if (data && data.choices && data.choices[0] && data.choices[0].message) {
+              answer = data.choices[0].message.content;
+            } else {
+              fallbackReason = 'OpenRouter choices missing';
+            }
           } else {
-            const answer = data.candidates[0].content.parts[0].text;
-            
+            if (data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
+              answer = data.candidates[0].content.parts[0].text;
+            } else {
+              fallbackReason = 'Gemini candidates missing';
+            }
+          }
+
+          if (answer) {
             console.log("GEMINI_API_KEY EXISTS:\n" + apiKeyExists);
             console.log("\nAPI KEY LENGTH:\n" + apiKeyLength);
             console.log("\nMODEL:\n" + modelStr);
@@ -107,15 +136,17 @@ router.post('/', async (req, res) => {
           }
         } else {
           if (response.status === 401) {
-            fallbackReason = 'Google 401';
+            fallbackReason = 'Google/OpenRouter 401';
+          } else if (response.status === 402) {
+            fallbackReason = 'OpenRouter 402 (payment required/no credits)';
           } else if (response.status === 403) {
-            fallbackReason = 'Google 403';
+            fallbackReason = 'Google/OpenRouter 403';
           } else if (response.status === 404) {
-            fallbackReason = 'Google 404';
+            fallbackReason = 'Google/OpenRouter 404';
           } else if (response.status === 429) {
             fallbackReason = 'quota exceeded';
           } else {
-            fallbackReason = `Google HTTP error (${response.status})`;
+            fallbackReason = `Google/OpenRouter HTTP error (${response.status})`;
           }
         }
       } catch (geminiErr) {
